@@ -1,0 +1,234 @@
+/* Hide scrollbars globally while maintaining scroll functionality */
+* {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* Internet Explorer 10+ */
+}
+
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none; /* Chrome, Safari, Opera */
+}
+
+/* Ensure body and html have no visible scrollbars */
+html, body {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  display: none;
+}
+
+/* Hide scrollbars for any scrollable container */
+div, section, article, aside, nav, main {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+div::-webkit-scrollbar,
+section::-webkit-scrollbar,
+article::-webkit-scrollbar,
+aside::-webkit-scrollbar,
+nav::-webkit-scrollbar,
+main::-webkit-scrollbar {
+  display: none;
+}
+
+/* Specifically target Tailwind overflow classes */
+.overflow-y-auto,
+.overflow-x-auto,
+.overflow-auto,
+.overflow-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.overflow-y-auto::-webkit-scrollbar,
+.overflow-x-auto::-webkit-scrollbar,
+.overflow-auto::-webkit-scrollbar,
+.overflow-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* Target any element with max-height that might scroll */
+[class*="max-h-"] {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+[class*="max-h-"]::-webkit-scrollbar {
+  display: none;
+}
+
+/* Additional comprehensive scrollbar hiding */
+.scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Target modals and containers specifically */
+[class*="fixed"],
+[class*="modal"],
+[class*="overflow"] {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+[class*="fixed"]::-webkit-scrollbar,
+[class*="modal"]::-webkit-scrollbar,
+[class*="overflow"]::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+/* Ensure all scrollable containers are invisible */
+*[style*="overflow"] {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+*[style*="overflow"]::-webkit-scrollbar {
+  display: none !important;
+}
+
+.App {
+  text-align: center;
+}
+
+.App-logo {
+  height: 40vmin;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .App-logo {
+    animation: App-logo-spin infinite 20s linear;
+  }
+}
+
+.App-header {
+  background-color: #282c34;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(10px + 2vmin);
+  color: white;
+}
+
+.App-link {
+  color: #61dafb;
+}
+
+@keyframes App-logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Enhanced Background Animations */
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px) scale(1);
+  }
+  50% {
+    transform: translateY(-20px) scale(1.05);
+  }
+}
+
+@keyframes float-delay {
+  0%, 100% {
+    transform: translateY(0px) scale(1) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-15px) scale(1.02) rotate(5deg);
+  }
+}
+
+@keyframes float-slow {
+  0%, 100% {
+    transform: translateY(0px) scale(1);
+  }
+  50% {
+    transform: translateY(-10px) scale(1.01);
+  }
+}
+
+@keyframes spin-reverse {
+  from {
+    transform: rotate(360deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+
+@keyframes spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes spin-reverse-slow {
+  from {
+    transform: rotate(360deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+
+/* Apply animations */
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+.animate-float-delay {
+  animation: float-delay 8s ease-in-out infinite;
+}
+
+.animate-float-slow {
+  animation: float-slow 10s ease-in-out infinite;
+}
+
+.animate-spin-reverse {
+  animation: spin-reverse 20s linear infinite;
+}
+
+.animate-spin-slow {
+  animation: spin-slow 30s linear infinite;
+}
+
+.animate-spin-reverse-slow {
+  animation: spin-reverse-slow 25s linear infinite;
+}
+
+/* Dropdown animation */
+@keyframes dropdownSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-dropdown-in {
+  animation: dropdownSlideIn 0.2s ease-out forwards;
+}
