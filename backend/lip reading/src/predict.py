@@ -1,61 +1,127 @@
-import cv2
-import numpy as np
-import tensorflow as tf
-import dlib
+detector = dlib.get_frontal_face_detector()
+
 import os
 import time
-from deep_translator import GoogleTranslator
+import cv2
+import numpy as np
+import sys
 
-# Paths
-THIS_DIR = os.path.dirname(__file__)  # .../lip reading/src
-PARENT_DIR = os.path.dirname(THIS_DIR)  # .../lip reading
+# --- Fast-startup, lazy loading, robust init ---
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+try:
+    import tensorflow as tf
+    tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+    for gpu in gpus:
+        try:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        except Exception:
+            pass
+except Exception as e:
+    print(f"[WARN] TensorFlow import/config failed: {e}")
+    tf = None
+
+THIS_DIR = os.path.dirname(__file__)
+PARENT_DIR = os.path.dirname(THIS_DIR)
 MODEL_PATH = os.path.join(THIS_DIR, "model", "lip_reader_cnn_lstm.h5")
 PROCESSED_DATA_DIR = os.path.join(THIS_DIR, "processed_data")
 OUTPUT_FILE = os.path.join(PARENT_DIR, "output.txt")
 STOP_FILE = os.path.join(PARENT_DIR, "stop.txt")
 
 TRANSLATE_DEST = 'kn'
-translator = GoogleTranslator(source='auto', target=TRANSLATE_DEST)
+try:
+    from deep_translator import GoogleTranslator
+    translator = GoogleTranslator(source='auto', target=TRANSLATE_DEST)
+except Exception as e:
+    print(f"[WARN] deep_translator not available: {e}")
+    translator = None
 
-# Clear any old stop signal so we don't exit immediately on startup
-if os.path.exists(STOP_FILE):
-    try:
-        os.remove(STOP_FILE)
-        print(f"[INFO] Cleared old stop file at startup: {STOP_FILE}")
-    except Exception as e:
-        print(f"[WARN] Could not remove old stop file {STOP_FILE}: {e}")
-
-if not os.path.exists(MODEL_PATH):
-    print(f"Error: Model file {MODEL_PATH} not found.")
-    exit(1)
-
-model = tf.keras.models.load_model(MODEL_PATH)
-print(f"\n Loaded model from {MODEL_PATH}")
-
-if not os.path.exists(PROCESSED_DATA_DIR):
-    print(f"Error: Processed data dir {PROCESSED_DATA_DIR} not found.")
-    exit(1)
-
-words = sorted(os.listdir(PROCESSED_DATA_DIR))
-if not words:
-    print("Error: No words found in processed_data/.")
-    exit(1)
-
-word_to_index = {word: i for i, word in enumerate(words)}
-index_to_word = {i: word for word, i in word_to_index.items()}
-print("Loaded words:", words)
-
-detector = dlib.get_frontal_face_detector()
-predictor_path = os.path.join(THIS_DIR, "..", "model", "shape_predictor_68_face_landmarks.dat")
-predictor = dlib.shape_predictor(predictor_path)
-
-face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+# Write 'No output' at startup
 try:
     os.makedirs(PARENT_DIR, exist_ok=True)
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         f.write("No output")
 except Exception:
     pass
+
+# Wait for STOP_FILE to be removed before starting (lazy activation)
+print("[INFO] Waiting for STOP_FILE to be removed before starting capture...")
+while os.path.exists(STOP_FILE):
+    time.sleep(0.5)
+
+start_time = time.time()
+
+# Model loading
+if not tf or not os.path.exists(MODEL_PATH):
+    print(f"[WARN] Model file {MODEL_PATH} not found or TensorFlow unavailable.")
+    sys.exit(0)
+try:
+    model = tf.keras.models.load_model(MODEL_PATH, compile=False)
+    print(f"\n✅ Loaded model from {MODEL_PATH}")
+except Exception as e:
+    print(f"[WARN] Could not load model: {e}")
+    sys.exit(0)
+
+if not os.path.exists(PROCESSED_DATA_DIR):
+    print(f"[WARN] Processed data dir {PROCESSED_DATA_DIR} not found.")
+    sys.exit(0)
+
+words = sorted(os.listdir(PROCESSED_DATA_DIR))
+if not words:
+    print("[WARN] No words found in processed_data/.")
+    sys.exit(0)
+
+word_to_index = {word: i for i, word in enumerate(words)}
+index_to_word = {i: word for word, i in word_to_index.items()}
+print("Loaded words:", words)
+
+# Dlib detector/predictor
+try:
+    import dlib
+    detector = dlib.get_frontal_face_detector()
+    predictor_path = os.path.join(THIS_DIR, "..", "model", "shape_predictor_68_face_landmarks.dat")
+    if not os.path.exists(predictor_path):
+        print(f"[WARN] shape_predictor file missing: {predictor_path}")
+        predictor = None
+    else:
+        predictor = dlib.shape_predictor(predictor_path)
+except Exception as e:
+    print(f"[WARN] dlib or shape_predictor unavailable: {e}")
+    detector = None
+    predictor = None
+
+face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+
+FRAME_COUNT = 16
+MOVEMENT_THRESHOLD = 600
+
+def _open_cam():
+    backends = [cv2.CAP_DSHOW, cv2.CAP_ANY]
+    for idx in [0, 1, 2]:
+        for be in backends:
+            cap = cv2.VideoCapture(idx, be)
+            if cap.isOpened():
+                print(f"[INFO] Opened webcam index {idx} (backend {be})")
+                return cap
+            try:
+                cap.release()
+            except Exception:
+                pass
+    print("[WARN] Could not open webcam.")
+    sys.exit(0)
+
+cap = _open_cam()
+
+# track frames for prediction
+frames = []
+recording = False
+predicted_word = ""
+prev_lip_region = None
+last_text = ""
+frame_file = os.path.join(PARENT_DIR, "frame.jpg")
+idle_counter = 0
+
+print(f"[INFO] Initialization complete in {time.time() - start_time:.2f}s. Starting main loop.")
 
 FRAME_COUNT = 16
 MOVEMENT_THRESHOLD = 600

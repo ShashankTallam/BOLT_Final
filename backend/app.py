@@ -1,3 +1,4 @@
+
 from flask import Flask, jsonify, Response
 import subprocess
 import threading
@@ -41,10 +42,19 @@ def run_lip_reading():
     global latest_result
     base_dir = os.path.dirname(__file__)
     venv_python = os.path.join(base_dir, "LH", "Scripts", "python.exe")
-    predict_script = os.path.join(base_dir, "lip reading", "src", "predict.py")
+    # robust path resolution for predict_script
+    candidate1 = os.path.join(base_dir, "lip reading", "src", "predict.py")
+    candidate2 = "/mnt/data/predict.py"  # uploaded/test file location
+    if os.path.exists(candidate1):
+        predict_script = candidate1
+    elif os.path.exists(candidate2):
+        predict_script = candidate2
+    else:
+        # keep candidate1 as default so existing behavior & error handling remain
+        predict_script = candidate1
+    print(f"[DEBUG] Using predict_script path: {predict_script}")
     output_file = os.path.join(base_dir, "lip reading", "output.txt")
     stop_file = os.path.join(base_dir, "lip reading", "stop.txt")
-    frame_file = os.path.join(base_dir, "lip reading", "frame.jpg")
 
     ensure_removed(output_file)
     ensure_removed(stop_file)
@@ -61,45 +71,24 @@ def run_lip_reading():
             # choose the python executable: prefer venv, else use the running interpreter
             python_exec = venv_python if os.path.exists(venv_python) else sys.executable
             print(f"[DEBUG] lip_reading will use python_exec={python_exec}")
+            # write debug info to the lip_reading log to help diagnose startup failures
+            try:
+                lf.write(f"[DEBUG] lip_reading will use python_exec={python_exec}\n")
+                lf.write(f"[DEBUG] predict_script={predict_script}\n")
+                lf.write(f"[DEBUG] predict_script exists={os.path.exists(predict_script)}\n")
+                lf.write(f"[DEBUG] predict_script dirname exists={os.path.isdir(os.path.dirname(predict_script))}\n")
+                lf.flush()
+            except Exception:
+                pass
             cmd = [python_exec, predict_script]
-            proc = subprocess.Popen(cmd, stdout=lf, stderr=subprocess.STDOUT, cwd=os.path.dirname(predict_script))
+            # Set UTF-8 encoding to prevent UnicodeEncodeError from emoji/UTF-8 output
+            env = os.environ.copy()
+            env['PYTHONIOENCODING'] = 'utf-8'
+            env.setdefault('LANG', 'en_US.UTF-8')
+            proc = subprocess.Popen(cmd, stdout=lf, stderr=subprocess.STDOUT, cwd=os.path.dirname(predict_script) if os.path.isdir(os.path.dirname(predict_script)) else None, env=env)
             # store process so it can be inspected by other endpoints if needed
             _threads['lip_reading_proc'] = proc
             print(f"LipReading Popen started pid={proc.pid}")
-            # create a placeholder frame for lip-reading immediately
-            try:
-                import numpy as _np
-                H, W = 480, 640
-                placeholder = _np.zeros((H, W, 3), dtype=_np.uint8)
-                try:
-                    import cv2 as _cv2
-                    txt = 'Starting...'
-                    font = _cv2.FONT_HERSHEY_SIMPLEX
-                    scale = 1.6
-                    thickness = 3
-                    (tw, th), _ = _cv2.getTextSize(txt, font, scale, thickness)
-                    x = max(10, (W - tw) // 2)
-                    y = max(th + 10, (H + th) // 2)
-                    _cv2.putText(placeholder, txt, (x, y), font, scale, (255, 255, 255), thickness, _cv2.LINE_AA)
-                except Exception:
-                    pass
-                try:
-                    from PIL import Image as _Image
-                    im = _Image.fromarray(placeholder[:, :, ::-1])
-                    tmp = frame_file + ".tmp"
-                    im.save(tmp, format='JPEG', quality=85)
-                    try:
-                        os.replace(tmp, frame_file)
-                    except Exception:
-                        os.rename(tmp, frame_file)
-                except Exception:
-                    try:
-                        import cv2 as _cv2
-                        _cv2.imwrite(frame_file, placeholder)
-                    except Exception as e:
-                        print('[WARN] Could not write lip placeholder frame:', e)
-            except Exception as e:
-                print('[WARN] Could not write lip placeholder frame:', e)
     except Exception as e:
         print("❌ Lip Reading error:", e)
 
@@ -181,22 +170,6 @@ def home():
 
 @app.route("/start_lip_reading", methods=["GET"])
 def start_lip_reading():
-    # If a previous subprocess exists, try to stop it first (prevents camera lock)
-    try:
-        proc = _threads.get('lip_reading_proc')
-        if proc is not None:
-            print(f"[INFO] Pre-stop existing lip_reading proc pid={getattr(proc, 'pid', None)}")
-            try:
-                proc.terminate()
-                proc.wait(timeout=2)
-            except Exception:
-                try:
-                    proc.kill()
-                except Exception:
-                    pass
-    except Exception as e:
-        print('[WARN] Failed to pre-stop existing lip_reading subprocess:', e)
-
     t = threading.Thread(target=run_lip_reading, daemon=True)
     t.start()
     _threads["lip_reading"] = t
@@ -211,21 +184,6 @@ def stop_lip_reading():
         os.makedirs(os.path.dirname(stop_file), exist_ok=True)
         with open(stop_file, "w") as f:
             f.write("stop")
-        # also try to terminate the subprocess if it was started (free the camera quickly)
-        try:
-            proc = _threads.get('lip_reading_proc')
-            if proc is not None:
-                print(f"[INFO] Attempting to terminate lip_reading proc pid={getattr(proc, 'pid', None)}")
-                try:
-                    proc.terminate()
-                    proc.wait(timeout=2)
-                except Exception:
-                    try:
-                        proc.kill()
-                    except Exception:
-                        pass
-        except Exception as e:
-            print('[WARN] Failed to terminate lip_reading subprocess:', e)
         return jsonify({"status": "stop signal written for lip reading"})
     except Exception as e:
         return jsonify({"status": "failed", "error": str(e)}), 500
@@ -233,22 +191,6 @@ def stop_lip_reading():
 
 @app.route("/start_hand_gestures", methods=["GET"])
 def start_hand_gestures():
-    # Stop lip-reading subprocess if running to avoid camera contention
-    try:
-        proc = _threads.get('lip_reading_proc')
-        if proc is not None:
-            print(f"[INFO] Pre-stop existing lip_reading proc pid={getattr(proc, 'pid', None)}")
-            try:
-                proc.terminate()
-                proc.wait(timeout=2)
-            except Exception:
-                try:
-                    proc.kill()
-                except Exception:
-                    pass
-    except Exception as e:
-        print('[WARN] Failed to pre-stop existing lip_reading subprocess:', e)
-
     t = threading.Thread(target=run_hand_gestures, daemon=True)
     t.start()
     _threads["hand_gestures"] = t
@@ -285,59 +227,33 @@ def stop_hand_gestures():
 
 @app.route("/latest_result", methods=["GET"])
 def get_latest_result():
-    # Return output for the subprocess that is currently running to match the active tab
+    # Prefer reading the hand gesture output file (most recent), then lip reading.
     base_dir = os.path.dirname(__file__)
     hg_out = os.path.join(base_dir, "hand_gestures", "output.txt")
     lr_out = os.path.join(base_dir, "lip reading", "output.txt")
 
-    def _alive(key):
-        try:
-            p = _threads.get(key)
-            return (p is not None) and (getattr(p, 'poll', lambda: None)() is None)
-        except Exception:
-            return False
-
-    # 1) If hand gestures are running, return their output first
-    if _alive('hand_gestures_proc'):
-        try:
-            if os.path.exists(hg_out):
-                text = read_output_file(hg_out)
-                if text:
-                    return jsonify({"type": "hand-gesture", "text": text})
-        except Exception as e:
-            print('[WARN] Error reading hand gesture output:', e)
-
-    # 2) If lip reading is running, return its output next
-    if _alive('lip_reading_proc'):
-        try:
-            if os.path.exists(lr_out):
-                text = read_output_file(lr_out)
-                if text:
-                    return jsonify({"type": "lip-reading", "text": text})
-        except Exception as e:
-            print('[WARN] Error reading lip reading output:', e)
-
-    # 3) Fallback: prefer the most recently updated file
+    # If hand gesture output exists and has content, return it
     try:
-        lr_m = os.path.getmtime(lr_out) if os.path.exists(lr_out) else -1
-        hg_m = os.path.getmtime(hg_out) if os.path.exists(hg_out) else -1
-        if lr_m >= hg_m and lr_m != -1:
-            text = read_output_file(lr_out)
-            if text:
-                return jsonify({"type": "lip-reading", "text": text})
-        if hg_m > lr_m and hg_m != -1:
+        if os.path.exists(hg_out):
             text = read_output_file(hg_out)
-            if text:
-                return jsonify({"type": "hand-gesture", "text": text})
-    except Exception:
-        pass
+            return jsonify({"type": "hand-gesture", "text": text or "No output"})
+    except Exception as e:
+        print('[WARN] Error reading hand gesture output:', e)
 
-    # 4) Final fallback
+    # Otherwise check lip reading
+    try:
+        if os.path.exists(lr_out):
+            text = read_output_file(lr_out)
+            return jsonify({"type": "lip-reading", "text": text or "No output"})
+    except Exception as e:
+        print('[WARN] Error reading lip reading output:', e)
+
+    # Fallback to the in-memory latest_result if present
     return jsonify(latest_result)
 
 
 # --------------------- #
-# VIDEO STREAM ROUTES
+# VIDEO STREAM ROUTE
 # --------------------- #
 camera = None
 
@@ -351,14 +267,33 @@ def generate_frames():
     while True:
         try:
             if os.path.exists(frame_file):
-                try:
-                    with open(frame_file, 'rb') as f:
-                        data = f.read()
+                # Try a few times to read the file to handle transient locks (Windows/OneDrive/AV)
+                data = None
+                max_attempts = 5
+                for attempt in range(max_attempts):
+                    try:
+                        with open(frame_file, 'rb') as f:
+                            data = f.read()
+                        break
+                    except PermissionError as e:
+                        # transient permission error; retry a few times
+                        if attempt < max_attempts - 1:
+                            time.sleep(0.05)
+                            continue
+                        else:
+                            print("[WARN] Failed to read frame file (permission denied):", e)
+                            data = None
+                    except Exception as e:
+                        # non-permission error, log and stop retrying
+                        print("[WARN] Failed to read frame file:", e)
+                        data = None
+                        break
+
+                if data:
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + data + b'\r\n')
-                except Exception as e:
-                    # if read fails, fall back to camera for this iteration
-                    print("[WARN] Failed to read frame file:", e)
+                else:
+                    # couldn't read the on-disk frame; fall back to camera for this iteration
                     time.sleep(0.05)
                     continue
             else:
@@ -382,7 +317,7 @@ def generate_frames():
 
 @app.route("/video_feed")
 def video_feed():
-    """Stream webcam feed to frontend for hand gestures"""
+    """Stream webcam feed to frontend"""
     return Response(generate_frames(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
 
@@ -393,71 +328,26 @@ def video_feed_lip():
     frame_file = os.path.join(base_dir, "lip reading", "frame.jpg")
 
     def gen():
-        last_frame = None
-        retry_count = 0
-        max_retries = 3
-        
         while True:
             try:
                 if os.path.exists(frame_file):
-                    data = None
-                    # Try multiple times to read the file (handle Windows file locks)
-                    for attempt in range(5):
-                        try:
-                            with open(frame_file, 'rb') as f:
-                                data = f.read()
-                            if data and len(data) > 0:
-                                last_frame = data
-                                retry_count = 0
-                                break
-                        except PermissionError:
-                            if attempt < 4:
-                                time.sleep(0.02)
-                                continue
-                        except Exception as e:
-                            if attempt < 4:
-                                time.sleep(0.02)
-                                continue
-                            else:
-                                print(f"[WARN] Failed to read lip frame after {attempt+1} attempts:", e)
-                                break
-                    
-                    # If we got data, send it
-                    if data and len(data) > 0:
+                    try:
+                        with open(frame_file, "rb") as f:
+                            data = f.read()
                         yield (
                             b'--frame\r\n'
                             b'Content-Type: image/jpeg\r\n\r\n' + data + b'\r\n'
                         )
-                        time.sleep(0.033)  # ~30 FPS
-                    # If we failed but have a last frame, send that
-                    elif last_frame is not None:
-                        yield (
-                            b'--frame\r\n'
-                            b'Content-Type: image/jpeg\r\n\r\n' + last_frame + b'\r\n'
-                        )
-                        time.sleep(0.1)
-                    else:
-                        time.sleep(0.1)
+                    except Exception:
+                        time.sleep(0.05)
+                        continue
                 else:
-                    # Frame file doesn't exist yet - wait for it
-                    retry_count += 1
-                    if retry_count > max_retries:
-                        # Send a placeholder if we've waited too long
-                        if last_frame is not None:
-                            yield (
-                                b'--frame\r\n'
-                                b'Content-Type: image/jpeg\r\n\r\n' + last_frame + b'\r\n'
-                            )
-                    time.sleep(0.2)
-                    
+                    time.sleep(0.05)
             except GeneratorExit:
-                print("[INFO] Client disconnected from lip video feed")
                 break
-            except Exception as e:
-                print("[ERROR] video_feed_lip error:", e)
-                time.sleep(0.2)
+            except Exception:
+                time.sleep(0.05)
 
-    # Important: do not force 'Connection: close' here; browsers keep MJPEG streams open
     return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
 

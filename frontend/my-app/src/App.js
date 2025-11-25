@@ -63,7 +63,7 @@ const LipReadingApp = () => {
   const [savedGestures, setSavedGestures] = useState([]);
   // Track all detected gesture texts
   const [gestureHistory, setGestureHistory] = useState([]);
-  // update gesture history when a new gestureText/confidence arrives
+  // update gesture history and allHistory when a new gestureText/confidence arrives
   useEffect(() => {
     if (gestureText) {
       setGestureHistory(prev => {
@@ -78,6 +78,22 @@ const LipReadingApp = () => {
             confidence: gestureConfidence != null ? gestureConfidence.toFixed(1) : null,
           },
           ...filtered
+        ];
+      });
+      // Auto-add new gesture result to allHistory if not already present
+      setAllHistory((h) => {
+        const exists = h.some((it) => it.text === gestureText && it.type === 'gesture');
+        if (exists) return h;
+        return [
+          {
+            id: Date.now() + Math.random(),
+            type: 'gesture',
+            text: gestureText,
+            timestamp: new Date().toLocaleString(),
+            confidence: gestureConfidence != null ? gestureConfidence.toFixed(1) : null,
+            isSaved: false,
+          },
+          ...h
         ];
       });
     }
@@ -336,7 +352,13 @@ const LipReadingApp = () => {
       showToast('Already saved', 'info');
       return;
     }
-    const newSaved = {
+    // Find the matching history item
+    setAllHistory((h) => h.map((it) =>
+      it.text === gestureText && it.type === 'gesture' ? { ...it, isSaved: true } : it
+    ));
+    // Add to savedGestures for quick access
+    const match = allHistory.find((it) => it.text === gestureText && it.type === 'gesture');
+    const newSaved = match ? { ...match, isSaved: true } : {
       id: Date.now(),
       text: gestureText,
       timestamp: new Date().toLocaleString(),
@@ -344,15 +366,6 @@ const LipReadingApp = () => {
       isSaved: true,
     };
     setSavedGestures((prev) => [newSaved, ...prev]);
-    // also record in unified history list
-    setAllHistory((h) => [{
-      id: newSaved.id,
-      type: 'gesture',
-      text: newSaved.text,
-      timestamp: newSaved.timestamp,
-      confidence: newSaved.confidence,
-      isSaved: true,
-    }, ...h]);
     showToast('Saved to Recent Saves', 'success');
   };
 
@@ -472,35 +485,24 @@ const LipReadingApp = () => {
   // Save/history helpers
   const saveText = () => {
     if (!transcribedText.trim()) return;
-    // Prevent duplicate saves of the same text
     if (savedTexts.some((it) => it.text === transcribedText)) {
       showToast('Already saved', 'info');
       return;
     }
-    const match = allHistory.find((it) => it.text === transcribedText);
-    const savedId = match ? match.id : Date.now();
-    const newSaved = {
-      id: savedId,
+    // Mark the matching history item as saved
+    setAllHistory((h) => h.map((it) =>
+      it.text === transcribedText && it.type === 'lip-reading' ? { ...it, isSaved: true } : it
+    ));
+    // Add to savedTexts for quick access
+    const match = allHistory.find((it) => it.text === transcribedText && it.type === 'lip-reading');
+    const newSaved = match ? { ...match, isSaved: true } : {
+      id: Date.now(),
       text: transcribedText,
       timestamp: new Date().toLocaleString(),
       confidence: confidence.toFixed(1),
       isSaved: true,
     };
     setSavedTexts((prev) => [newSaved, ...prev]);
-    setAllHistory((h) => {
-      const exists = h.some((it) => it.id === savedId || it.text === transcribedText);
-      if (exists) {
-        return h.map((it) => (it.id === savedId || it.text === transcribedText ? { ...it, isSaved: true } : it));
-      }
-      return [{
-        id: savedId,
-        type: 'lip-reading',
-        text: transcribedText,
-        timestamp: newSaved.timestamp,
-        confidence: newSaved.confidence,
-        isSaved: true,
-      }, ...h];
-    });
     showToast('Saved to Recent Saves', 'success');
   };
 
@@ -625,10 +627,29 @@ const LipReadingApp = () => {
     stopSpeech();
   }, [stopHandGestureLive]);
 
+
   // keep a ref of the latest transcribed text for interval handler
   useEffect(() => {
     transcribedTextRef.current = transcribedText;
-  }, [transcribedText]);
+    // Auto-add new lip reading result to history if not already present and not empty
+    if (transcribedText && transcribedText.trim()) {
+      setAllHistory((h) => {
+        const exists = h.some((it) => it.text === transcribedText && it.type === 'lip-reading');
+        if (exists) return h;
+        return [
+          {
+            id: Date.now() + Math.random(),
+            type: 'lip-reading',
+            text: transcribedText,
+            timestamp: new Date().toLocaleString(),
+            confidence: confidence != null ? confidence.toFixed(1) : null,
+            isSaved: false,
+          },
+          ...h
+        ];
+      });
+    }
+  }, [transcribedText, confidence]);
 
   // Scroll detection for navbar transparency
   useEffect(() => {
