@@ -4,6 +4,13 @@
 /backend/LH/
 /backend/hand/
 venv/
+**/venv_py310/
+**/venv/
+**/model/*.h5
+**/model/*.dat
+**/collected_data/
+
+
 env/
 /.venv/
 
