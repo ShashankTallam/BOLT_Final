@@ -1,0 +1,6 @@
+opencv-python
+dlib
+imageio
+numpy
+tensorflow
+Pillow
